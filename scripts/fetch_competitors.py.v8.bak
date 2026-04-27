@@ -1,0 +1,406 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+竞品黑马发现脚本 v8 — 自学习版
+策略：
+  1. 直连导航站（不走Jina，避免限流）提取域名 → 主力
+  2. DuckDuckGo 关键词搜索提取域名 → 辅助（部分词有效）
+  3. 与历史库对比识别「新出现」「排名上升」
+  4. 发现新竞品后：
+     a. 自动更新来源导航站 monthly_hits（活跃度）
+     b. 抓竞品落地页友链，挖掘未记录的新导航站
+  5. 月度自动重置 monthly_hits，淘汰长期零命中导航站
+"""
+
+import json, re, subprocess, urllib.parse, random, time
+from datetime import datetime, date
+from pathlib import Path
+
+BASE_DIR  = Path("/root/.openclaw/skills/industry-intel/references")
+WATCHLIST = BASE_DIR / "nav_watchlist.json"
+HISTORY   = BASE_DIR / "domain_history.json"
+
+PROXY = "http://127.0.0.1:33210"
+
+# 20个高命中率关键词（按梯队）
+KEYWORDS_TIER1 = [
+    "中文成人APP 下载 官方版 2026",
+    "成人APP 福利导航",
+    "91抖阴 2026",
+    "抖阴最新版 无广告",
+    "海角社区APP 最新",
+    "麻豆视频APP 免费",
+    "禁漫天堂APP",
+    "成人短视频APP 排行",
+    "约炮APP 下载 2026",
+    "免费成人直播APP",
+]
+KEYWORDS_TIER2 = [
+    "逼哩逼哩 官方下载",
+    "糖心视频最新版",
+    "杏吧资源APP",
+    "黑料吃瓜APP",
+    "无广告黄色APP 2026",
+    "海角乱伦社区 下载",
+    "快手视频成人版 下载",
+    "P站专业版 APK",
+    "乱伦APP 下载",
+    "AI女神APP 下载",
+]
+
+# 过滤域名黑名单
+SKIP_DOMAINS = {
+    "pornhub.com","xvideos.com","xnxx.com","xhamster.com","91porn.com",
+    "t66y.com","google.com","baidu.com","youtube.com","twitter.com",
+    "reddit.com","wikipedia.org","duckduckgo.com","yandex.com",
+    "github.com","cloudflare.com","chinaz.com","analytics.google.com",
+    "chacuo.net","linkedin.com","facebook.com","spotify.com",
+    "weibo.com","qq.com","sina.com","163.com",
+}
+
+# 导航站特征词（用于识别友链里的导航站）
+NAV_SIGNALS = ["nav","navi","fuli","dh.cc","dh.net","dh.app",
+               "daohang","导航","map.com","gps.net","app.org"]
+
+# 导航站内容类域名后缀（区分内容站 vs 工具站）
+CONTENT_TLDS = {".com",".net",".cc",".tv",".xyz",".top",".vip",
+                ".fun",".live",".app",".org",".se",".io"}
+
+# ─────────────────────────────────────────────
+# 工具函数
+# ─────────────────────────────────────────────
+
+def curl_get(url, use_proxy=False, timeout=15):
+    cmd = ["curl", "-sL", "--max-time", str(timeout),
+           "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"]
+    if use_proxy:
+        cmd += ["--proxy", PROXY]
+    cmd.append(url)
+    try:
+        r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           universal_newlines=True, timeout=timeout + 5)
+        if r.returncode == 0 and r.stdout and len(r.stdout) > 200:
+            return r.stdout
+    except Exception as e:
+        print(f"    curl失败: {e}")
+    return ""
+
+
+def extract_domains(html):
+    """从 HTML 提取去重域名集合"""
+    raw = re.findall(
+        r'https?://([a-zA-Z0-9][a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,6})',
+        html
+    )
+    domains = set()
+    for d in raw:
+        d = d.lower().strip(".")
+        root = ".".join(d.split(".")[-2:])
+        if root in SKIP_DOMAINS or len(root) < 5:
+            continue
+        domains.add(root)
+    return domains
+
+
+def extract_ddg_domains(html):
+    """从 DuckDuckGo HTML 提取 uddg= 参数里的真实 URL 域名"""
+    matches = re.findall(r'uddg=(https?%3A%2F%2F[^&"]+)', html)
+    domains = set()
+    for m in matches:
+        url = urllib.parse.unquote(m)
+        match = re.match(r'https?://([^/?#]+)', url)
+        if match:
+            d = match.group(1).lower().lstrip("www.")
+            root = ".".join(d.split(".")[-2:])
+            if root not in SKIP_DOMAINS and len(root) > 5:
+                domains.add(root)
+    return domains
+
+
+def looks_like_nav(domain):
+    return any(sig in domain for sig in NAV_SIGNALS)
+
+
+# ─────────────────────────────────────────────
+# 加载 / 保存
+# ─────────────────────────────────────────────
+
+def load_watchlist():
+    if not WATCHLIST.exists():
+        return {"sources": []}
+    return json.loads(WATCHLIST.read_text(encoding="utf-8"))
+
+
+def save_watchlist(data):
+    data["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+    WATCHLIST.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def load_history():
+    if not HISTORY.exists():
+        return {}
+    return json.loads(HISTORY.read_text(encoding="utf-8"))
+
+
+def save_history(data):
+    HISTORY.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+# ─────────────────────────────────────────────
+# 月度重置：淘汰连续0命中的低优先级站
+# ─────────────────────────────────────────────
+
+def maybe_reset_monthly(data):
+    today_month = date.today().strftime("%Y-%m")
+    if data.get("last_monthly_reset") == today_month:
+        return data
+
+    print(f"\n[月度重置] {today_month}")
+    demoted = []
+    for s in data["sources"]:
+        hits = s.get("monthly_hits", 0)
+        if hits == 0 and s.get("priority") == "low":
+            s["enabled"] = False
+            s["status"] = "demoted"
+            demoted.append(s["name"])
+        s["monthly_hits"] = 0
+
+    data["last_monthly_reset"] = today_month
+    if demoted:
+        print(f"  降级: {demoted}")
+    return data
+
+
+# ─────────────────────────────────────────────
+# 自学习：更新导航站活跃度
+# ─────────────────────────────────────────────
+
+def update_nav_hit(data, nav_name):
+    for s in data["sources"]:
+        if s["name"] == nav_name:
+            s["monthly_hits"] = s.get("monthly_hits", 0) + 1
+            s["last_hit_date"] = date.today().isoformat()
+            hits = s["monthly_hits"]
+            if hits >= 5:
+                s["priority"] = "high"
+            elif hits >= 2:
+                s["priority"] = "medium"
+            break
+
+
+# ─────────────────────────────────────────────
+# 自学习：从竞品友链挖掘新导航站
+# ─────────────────────────────────────────────
+
+def mine_nav_from_competitor(domain, data):
+    known = {s["url"].lower().rstrip("/") for s in data["sources"]}
+    html = curl_get(f"https://{domain}", timeout=10)
+    if not html:
+        return 0
+
+    found = 0
+    for d in extract_domains(html):
+        candidate = f"https://{d}"
+        if candidate.lower().rstrip("/") in known:
+            continue
+        if not looks_like_nav(d):
+            continue
+        data["sources"].append({
+            "name": d,
+            "url": candidate,
+            "category": "自动发现-待分类",
+            "priority": "low",
+            "enabled": True,
+            "status": "new",
+            "monthly_hits": 0,
+            "last_hit_date": "",
+            "notes": f"从竞品 {domain} 友链发现 {date.today().isoformat()}"
+        })
+        known.add(candidate.lower())
+        print(f"    ✨ 新导航站: {d}")
+        found += 1
+    return found
+
+
+# ─────────────────────────────────────────────
+# 抓取：导航站（主力）
+# ─────────────────────────────────────────────
+
+def fetch_nav_domains(sources):
+    priority_order = {"high": 0, "medium": 1, "low": 2}
+    active = [s for s in sources
+              if s.get("enabled") and s.get("status") not in ("demoted",)]
+    active.sort(key=lambda x: priority_order.get(x.get("priority", "low"), 2))
+
+    print(f"\n[导航站抓取] {len(active)} 个")
+    nav_domains = {}  # domain -> nav_name
+
+    for s in active:
+        name, url = s["name"], s["url"]
+        print(f"  → {name}")
+        html = curl_get(url, use_proxy=False, timeout=12)
+        if not html:
+            # 直连失败，尝试代理
+            html = curl_get(url, use_proxy=True, timeout=12)
+        if not html:
+            print(f"    ✗ 无响应")
+            s["status"] = "error"
+            continue
+
+        s["status"] = "ok"
+        domains = extract_domains(html)
+        added = sum(1 for d in domains if d not in nav_domains)
+        for d in domains:
+            if d not in nav_domains:
+                nav_domains[d] = name
+        print(f"    ✓ {len(domains)} 域名，新增 {added}")
+        time.sleep(0.5)  # 避免过快
+
+    return nav_domains
+
+
+# ─────────────────────────────────────────────
+# 抓取：关键词搜 DDG（辅助）
+# ─────────────────────────────────────────────
+
+def fetch_search_domains(keywords):
+    print(f"\n[关键词搜索] {len(keywords)} 个关键词")
+    search_domains = {}  # domain -> {keyword, rank}
+
+    for kw in keywords:
+        encoded = urllib.parse.quote(kw)
+        url = f"https://html.duckduckgo.com/html/?q={encoded}"
+        html = curl_get(url, use_proxy=False, timeout=12)
+        domains = list(extract_ddg_domains(html)) if html else []
+
+        if not domains:
+            # DDG 对该词过滤，换代理试一次
+            html = curl_get(url, use_proxy=True, timeout=12)
+            domains = list(extract_ddg_domains(html)) if html else []
+
+        for i, d in enumerate(domains[:20], 1):
+            if d not in search_domains:
+                search_domains[d] = {"keyword": kw, "rank": i}
+
+        status = f"{len(domains)} 个域名" if domains else "无结果（DDG过滤）"
+        print(f"  [{status}] {kw}")
+        time.sleep(0.8)
+
+    return search_domains
+
+
+# ─────────────────────────────────────────────
+# 分类 + 自学习
+# ─────────────────────────────────────────────
+
+def classify_and_learn(nav_domains, search_domains, history, watchlist_data):
+    today = date.today().isoformat()
+    all_domains = set(nav_domains.keys()) | set(search_domains.keys())
+    results = []
+    new_nav_total = 0
+
+    for domain in all_domains:
+        nav_src  = nav_domains.get(domain, "")
+        s_info   = search_domains.get(domain, {})
+        keyword  = s_info.get("keyword", "")
+        rank     = s_info.get("rank", 99)
+        prev     = history.get(domain)
+
+        if prev is None:
+            change_type = "new"
+        elif prev.get("rank", 99) - rank >= 3:
+            change_type = "rising"
+        else:
+            change_type = "seen"
+
+        results.append({
+            "domain":      domain,
+            "nav_source":  nav_src,
+            "keyword":     keyword,
+            "rank":        rank,
+            "change_type": change_type,
+            "first_seen":  prev.get("first_seen", today) if prev else today,
+        })
+
+        # 自学习触发
+        if change_type in ("new", "rising"):
+            if nav_src:
+                update_nav_hit(watchlist_data, nav_src)
+            if change_type == "new":
+                found = mine_nav_from_competitor(domain, watchlist_data)
+                new_nav_total += found
+
+        history[domain] = {
+            "rank":       rank,
+            "last_seen":  today,
+            "first_seen": prev.get("first_seen", today) if prev else today,
+            "nav_source": nav_src or (prev.get("nav_source","") if prev else ""),
+            "keyword":    keyword,
+        }
+
+    priority_map = {"new": 0, "rising": 1, "seen": 2}
+    results.sort(key=lambda x: (priority_map[x["change_type"]], x["rank"]))
+    print(f"\n[自学习] 友链发现新导航站候选: {new_nav_total} 个")
+    return results
+
+
+# ─────────────────────────────────────────────
+# main
+# ─────────────────────────────────────────────
+
+def main():
+    print("=== 竞品黑马发现 v8（自学习版）===")
+    today = date.today().isoformat()
+
+    watchlist_data = load_watchlist()
+    history        = load_history()
+
+    watchlist_data = maybe_reset_monthly(watchlist_data)
+    print(f"导航站: {len(watchlist_data['sources'])} 个 | 历史库: {len(history)} 条")
+
+    # 抓取（Tier2随机抽5个）
+    nav_domains    = fetch_nav_domains(watchlist_data["sources"])
+    tier2_sample   = random.sample(KEYWORDS_TIER2, min(5, len(KEYWORDS_TIER2)))
+    search_domains = fetch_search_domains(KEYWORDS_TIER1 + tier2_sample)
+
+    # 分类 + 自学习
+    classified = classify_and_learn(nav_domains, search_domains, history, watchlist_data)
+
+    save_history(history)
+    save_watchlist(watchlist_data)
+
+    new_sites    = [x for x in classified if x["change_type"] == "new"][:20]
+    rising_sites = [x for x in classified if x["change_type"] == "rising"][:10]
+
+    output = {
+        "date":             today,
+        "nav_sources_used": [s["name"] for s in watchlist_data["sources"] if s.get("status") == "ok"],
+        "keywords_used":    KEYWORDS_TIER1 + tier2_sample,
+        "watchlist_size":   len(watchlist_data["sources"]),
+        "history_size":     len(history),
+        "summary":          {"new": len(new_sites), "rising": len(rising_sites)},
+        "new_competitors":  new_sites,
+        "rising_competitors": rising_sites,
+    }
+
+    with open("/tmp/competitors_data.json", "w", encoding="utf-8") as f:
+        json.dump(output, f, ensure_ascii=False, indent=2)
+
+    print(f"\n✅ 完成")
+    print(f"  🆕 新竞品:     {len(new_sites)}")
+    print(f"  📈 排名上升:   {len(rising_sites)}")
+    print(f"  📚 历史库:     {len(history)} 条")
+    print(f"  📡 导航站库:   {len(watchlist_data['sources'])} 个")
+
+    if new_sites:
+        print("\n新竞品预览（前8）：")
+        for s in new_sites[:8]:
+            src = s["nav_source"] or s["keyword"]
+            print(f"  [{s['change_type'].upper()}] {s['domain']} | 来源: {src}")
+
+    return output
+
+
+if __name__ == "__main__":
+    main()
+

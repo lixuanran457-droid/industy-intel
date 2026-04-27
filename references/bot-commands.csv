@@ -1,0 +1,49 @@
+﻿Skill名称,Skill定位,命令,说明,触发时机
+ai-monetize-intel,AI行业情报+Telegram变现,搜集AI动态,执行今日AI行业信息收集,随时
+ai-monetize-intel,AI行业情报+Telegram变现,生成AI日报,生成完整AI变现情报日报,每日
+ai-monetize-intel,AI行业情报+Telegram变现,生成AI周报,生成AI变现情报周报,建议周一触发
+ai-monetize-intel,AI行业情报+Telegram变现,AI变现案例,搜索最新AI变现成功案例,随时
+ai-monetize-intel,AI行业情报+Telegram变现,TG情报,搜集Telegram变现最新动态,随时
+ai-monetize-intel,AI行业情报+Telegram变现,AI工具榜,生成今日/本周AI工具热榜,每日/每周
+ai-monetize-intel,AI行业情报+Telegram变现,TG频道分析,分析指定TG频道的变现模式,随时
+ai-monetize-intel,AI行业情报+Telegram变现,追踪AI [关键词],深度追踪特定AI主题,示例:追踪AI MCP协议
+industry-intel,成人行业动态+竞品发现,搜集今日动态,执行今日成人行业信息收集,每日10:30自动/随时手动
+industry-intel,成人行业动态+竞品发现,生成今日报告,生成完整成人行业情报日报,每日
+industry-intel,成人行业动态+竞品发现,生成周报,生成成人行业情报周报,每周一
+industry-intel,成人行业动态+竞品发现,发现竞品,搜索新竞品APP/网站,随时
+industry-intel,成人行业动态+竞品发现,关键词排行,生成搜索关键词日榜TOP 20,每日
+industry-intel,成人行业动态+竞品发现,追踪 [关键词],深度追踪特定成人行业主题,示例:追踪 付费社群
+product-experience,APP/产品体验分析,体验 [APP名],开始体验分析指定产品,随时
+product-experience,APP/产品体验分析,对比 [A] vs [B],两款产品体验对比,随时
+product-experience,APP/产品体验分析,查看当前标准,显示当前体验评估规范,随时
+product-experience,APP/产品体验分析,更新体验标准:[内容],修正/补充分析标准,每次体验后反馈
+product-experience,APP/产品体验分析,本月体验总结,汇总本月所有体验报告,每月末
+product-journey-simulator,用户产品旅程模拟,模拟新用户 [APP名],模拟完整新用户旅程,随时
+product-journey-simulator,用户产品旅程模拟,模拟付费旅程 [APP名],专注模拟付费转化路径,随时
+product-journey-simulator,用户产品旅程模拟,模拟流失旅程 [APP名],模拟用户从进入到放弃,随时
+product-journey-simulator,用户产品旅程模拟,旅程对比 [A] vs [B],对比两款产品的用户旅程差异,随时
+product-journey-simulator,用户产品旅程模拟,关键节点分析 [APP名],找出旅程中的关键决策节点,随时
+product-journey-simulator,用户产品旅程模拟,生成旅程地图 [APP名],输出完整用户旅程地图,随时
+screenshot-auto-annotator,截图自动标注,标注截图 +发图,自动识别截图问题并标红框,随时
+screenshot-auto-annotator,截图自动标注,优化截图 +发图,给出改版建议并生成对比图,随时
+screenshot-auto-annotator,截图自动标注,商业化分析 +发图,专注分析商业化设计,随时
+screenshot-auto-annotator,截图自动标注,用户体验打分 +发图,多维度UX评分,随时
+screenshot-auto-annotator,截图自动标注,批量标注 [n张],批量处理多张截图,随时
+screenshot-auto-annotator,截图自动标注,生成对比报告,汇总本次标注为报告,随时
+commercial-flow-analyzer,商业化漏斗分析,分析商业化 [APP名],完整分析目标产品商业化体系,随时
+commercial-flow-analyzer,商业化漏斗分析,漏斗分析 [APP名],流量到付费的完整漏斗分析,随时
+commercial-flow-analyzer,商业化漏斗分析,找断点 [APP名],定位商业化链路中的流失点,随时
+commercial-flow-analyzer,商业化漏斗分析,对标竞品商业化 [A] vs [B],对比两款产品商业化差异,随时
+commercial-flow-analyzer,商业化漏斗分析,变现模式总结 [APP名],总结目标产品变现模式,随时
+commercial-flow-analyzer,商业化漏斗分析,优化建议 [APP名],针对薄弱环节给出改进建议,随时
+competitive-experience-comparator,竞品体验对比,竞品对比 [A] vs [B],多维度对比两款竞品体验,随时
+competitive-experience-comparator,竞品体验对比,竞品矩阵 [行业],生成行业竞品体验矩阵,随时
+competitive-experience-comparator,竞品体验对比,找差异化 [APP名],找出差异化机会点,随时
+competitive-experience-comparator,竞品体验对比,竞品截图对比 +发图,通过截图对比多款竞品,随时
+competitive-experience-comparator,竞品体验对比,竞品周报,汇总本周竞品体验变化,每周
+competitive-experience-comparator,竞品体验对比,更新竞品库 [APP名],将新竞品加入对比库,随时
+seo-sentinel,SEO监控+关键词追踪,SEO日检,执行今日关键词排名检查,每日自动
+seo-sentinel,SEO监控+关键词追踪,关键词排名 [词],查询指定关键词当前排名,随时
+seo-sentinel,SEO监控+关键词追踪,排名变化报告,输出近7天排名变化趋势,随时
+seo-sentinel,SEO监控+关键词追踪,发现新词,挖掘新的SEO机会关键词,随时
+seo-sentinel,SEO监控+关键词追踪,竞品SEO [APP名],分析竞品的SEO策略,随时
